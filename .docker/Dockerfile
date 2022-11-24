@@ -45,7 +45,7 @@ RUN apt-get update && apt-get upgrade -y && \
 		libglu1-mesa \
 		libxi6 \
 		libxrender1 \
-		xz-utils && \
+		xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 

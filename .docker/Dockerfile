@@ -3,7 +3,7 @@ FROM nvidia/cuda:11.4.1-devel-ubuntu20.04
 ARG DEBIAN_FRONTEND=noninteractive
 ARG OPENCV_VERSION=4.5.3
 
-RUN apt-get update && apt-get upgrade -y &&\
+RUN apt-get update && apt-get upgrade -y && \
     # Install build tools and build dependencies
     apt-get install -y \
 	python3-pip \

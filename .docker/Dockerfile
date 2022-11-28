@@ -1,61 +1,80 @@
-FROM nvidia/cuda:11.4.1-devel-ubuntu20.04
+FROM node:18-buster-slim as build
 
-ARG DEBIAN_FRONTEND=noninteractive
-ARG OPENCV_VERSION=4.5.3
+RUN mkdir -p /app
 
-RUN apt-get update && apt-get upgrade -y && \
-    # Install build tools and build dependencies
-    apt-get install -y \
-	python3-pip \
-        build-essential \
-        cmake \
-        git \
+WORKDIR /app
+
+COPY . .
+#ARG NPM_TOKEN_ARG 
+#ENV NPM_TOKEN $NPM_TOKEN_ARG
+#RUN npm config set @homingos:registry https://npm.pkg.github.com/
+#RUN npm config set //npm.pkg.github.com/:_authToken ${NPM_TOKEN}
+RUN npm install --force
+RUN npm run build
+
+FROM nvidia/cudagl:11.4.2-base-ubuntu20.04 as app
+
+LABEL Title="Blender in Docker"
+
+# Environment variables
+ENV DEBIAN_FRONTEND noninteractive
+ENV LC_ALL C.UTF-8
+ENV LANG C.UTF-8
+ENV PATH "$PATH:/bin/3.2/python/bin/"
+ENV BLENDER_PATH "/bin/3.2"
+ENV BLENDERPIP "/bin/3.2/python/bin/pip3"
+ENV BLENDERPY "/bin/3.2/python/bin/python3.10"
+ENV HW="GPU"
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
         wget \
-        unzip \
-        yasm \
-        pkg-config \
-        libswscale-dev \
-        libtbb2 \
-        libtbb-dev \
-        libjpeg-dev \
-        libpng-dev \
-        libtiff-dev \
-        libavformat-dev \
-        libpq-dev \
-        libxine2-dev \
-        libglew-dev \
-        libtiff5-dev \
+        libopenexr-dev \
+        bzip2 \
+        build-essential \
         zlib1g-dev \
-        libjpeg-dev \
-        libavcodec-dev \
-        libavformat-dev \
-        libavutil-dev \
-        libpostproc-dev \
-        libswscale-dev \
-        libeigen3-dev \
-        libtbb-dev \
-        libgtk2.0-dev \
-        pkg-config \
-        ## Python
-        python3-dev \
-        python3-numpy \
-        ##blender dependencies
-        curl \
-		libfreetype6 \
-		libglu1-mesa \
-		libxi6 \
-		libxrender1 \
-		xz-utils \
-    && rm -rf /var/lib/apt/lists/*
+        libxmu-dev \
+        libxi-dev \
+        libxxf86vm-dev \
+        libfontconfig1 \
+        libxrender1 \
+        libgl1-mesa-glx \
+        xz-utils \
+        curl
+
+# Download and install Blender
+RUN wget https://mirror.clarkson.edu/blender/release/Blender3.2/blender-3.2.0-linux-x64.tar.xz \
+        && tar -xvf blender-3.2.0-linux-x64.tar.xz --strip-components=1 -C /bin \
+        && rm -rf blender-3.2.0-linux-x64.tar.xz \
+        && rm -rf blender-3.2.0-linux-x64
+
+# Download the Python source since it is not bundled with Blender
+RUN wget https://www.python.org/ftp/python/3.10.5/Python-3.10.5.tgz \
+        && tar -xzf Python-3.10.5.tgz \
+        && cp -r Python-3.10.5/Include/* $BLENDER_PATH/python/include/python3.10/ \
+        && rm -rf Python-3.10.5.tgz \
+        && rm -rf Python-3.10.5
+
+# Blender comes with a super outdated version of numpy (which is needed for matplotlib / opencv) so override it with a modern one
+RUN rm -rf ${BLENDER_PATH}/python/lib/python3.10/site-packages/numpy
+
+# Must first ensurepip to install Blender pip3 and then new numpy
+RUN ${BLENDERPY} -m ensurepip && ${BLENDERPIP} install --upgrade pip && ${BLENDERPIP} install numpy
+
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+
+RUN apt install -y nodejs
 
 
-ENV BLENDER_MAJOR 2.82
-ENV BLENDER_VERSION 2.82a
-ENV BLENDER_URL https://download.blender.org/release/Blender${BLENDER_MAJOR}/blender-${BLENDER_VERSION}-linux64.tar.xz
+# Set the working directory
+WORKDIR /app
 
-RUN curl -L ${BLENDER_URL} | tar -xJ -C /usr/local/ && \
-	mv /usr/local/blender-${BLENDER_VERSION}-linux64 /usr/local/blender
+COPY package*.json ./
 
-VOLUME /media
-ENTRYPOINT ["/usr/local/blender/blender", "-b"]
+COPY . .
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist/ ./dist/
 
+EXPOSE 3000
+
+CMD node -r '@aspecto/opentelemetry/auto-instrument' dist/main
